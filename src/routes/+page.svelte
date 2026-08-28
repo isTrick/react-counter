@@ -1,9 +1,17 @@
 <script lang="ts">
 	import { SiGithub } from '@icons-pack/svelte-simple-icons';
+	import DuplicateList from '$lib/components/DuplicateList.svelte';
+	import ProcessingSummary from '$lib/components/ProcessingSummary.svelte';
+	import { processFiles, type FileInput, type ProcessFilesResult } from '$lib/vcard/process-files';
 
 	interface SelectedFile {
 		id: string;
 		file: File;
+	}
+
+	interface FileReadError {
+		name: string;
+		message: string;
 	}
 
 	type RejectionReason = 'invalid-extension' | 'empty-file';
@@ -21,6 +29,11 @@
 	let selectedFiles = $state<SelectedFile[]>([]);
 	let rejectedFiles = $state<RejectedFile[]>([]);
 	let fileInput = $state<HTMLInputElement>();
+
+	let processing = $state(false);
+	let result = $state<ProcessFilesResult | null>(null);
+	let readErrors = $state<FileReadError[]>([]);
+	let showDuplicates = $state(false);
 
 	// Um arquivo inválido não impede o processamento dos demais: cada
 	// arquivo é aceito/rejeitado de forma independente.
@@ -57,12 +70,63 @@
 		// ciente sem descartar nada silenciosamente.
 		selectedFiles = [...selectedFiles, ...accepted];
 		rejectedFiles = [...rejectedFiles, ...newlyRejected];
+		clearResult();
 
 		if (fileInput) fileInput.value = '';
 	}
 
 	function removeFile(id: string) {
 		selectedFiles = selectedFiles.filter((selectedFile) => selectedFile.id !== id);
+		clearResult();
+	}
+
+	function clearResult() {
+		result = null;
+		readErrors = [];
+		showDuplicates = false;
+	}
+
+	type ReadOutcome = { ok: true; input: FileInput } | ({ ok: false } & FileReadError);
+
+	function isOk(outcome: ReadOutcome): outcome is { ok: true; input: FileInput } {
+		return outcome.ok;
+	}
+
+	async function readFile({ id, file }: SelectedFile): Promise<ReadOutcome> {
+		try {
+			const text = await file.text();
+			return { ok: true, input: { id, name: file.name, text } };
+		} catch (error) {
+			return {
+				ok: false,
+				name: file.name,
+				message: error instanceof Error ? error.message : String(error)
+			};
+		}
+	}
+
+	async function handleProcess() {
+		if (selectedFiles.length === 0 || processing) return;
+
+		processing = true;
+		clearResult();
+
+		// Promise.all preserva a correspondência de índice com selectedFiles
+		// mesmo que as leituras terminem fora de ordem — importante porque a
+		// deduplicação depende da ordem em que os contatos chegam (primeira
+		// ocorrência é a mantida).
+		const settled = await Promise.all(selectedFiles.map(readFile));
+
+		const inputs: FileInput[] = [];
+		const failures: FileReadError[] = [];
+		for (const entry of settled) {
+			if (isOk(entry)) inputs.push(entry.input);
+			else failures.push(entry);
+		}
+
+		readErrors = failures;
+		result = processFiles(inputs);
+		processing = false;
 	}
 
 	function dismissRejected() {
@@ -191,8 +255,80 @@
 							{/each}
 						</ul>
 					</div>
+
+					<button
+						type="button"
+						class="w-full rounded-md bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={processing}
+						onclick={handleProcess}
+					>
+						{processing ? 'Processando…' : 'Processar arquivos'}
+					</button>
 				{/if}
 			</section>
+
+			{#if readErrors.length > 0}
+				<p class="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+					Não foi possível ler {readErrors.length === 1 ? 'o arquivo' : 'os arquivos'}: {readErrors
+						.map((error) => error.name)
+						.join(', ')}.
+					{readErrors.length === 1 ? 'Os demais foram' : 'Os demais arquivos foram'} processados normalmente.
+				</p>
+			{/if}
+
+			{#if result}
+				<section aria-labelledby="summary-title" class="space-y-4 border-t border-zinc-800 pt-6">
+					<h3 id="summary-title" class="font-semibold">Resumo do processamento</h3>
+
+					<ProcessingSummary
+						filesProcessed={result.filesProcessed}
+						totalContactsFound={result.totalContactsFound}
+						uniqueContactsCount={result.contacts.length}
+						duplicatesRemovedCount={result.duplicates.length}
+						filesWithErrorsCount={result.filesWithNoContacts.length + readErrors.length}
+					/>
+
+					{#if result.filesWithNoContacts.length > 0}
+						<p
+							class="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+						>
+							Nenhum vCard válido encontrado em: {result.filesWithNoContacts.join(', ')}.
+						</p>
+					{/if}
+
+					{#if result.cardErrors.length > 0}
+						<p
+							class="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+						>
+							{result.cardErrors.length}
+							{result.cardErrors.length === 1
+								? 'contato inválido foi ignorado'
+								: 'contatos inválidos foram ignorados'}
+							dentro de arquivos processados com sucesso.
+						</p>
+					{/if}
+
+					{#if result.duplicates.length > 0}
+						<div>
+							<button
+								type="button"
+								class="text-sm font-medium text-emerald-400 underline underline-offset-4 hover:text-emerald-300"
+								onclick={() => (showDuplicates = !showDuplicates)}
+							>
+								{showDuplicates
+									? 'Ocultar duplicatas'
+									: `Ver duplicatas (${result.duplicates.length})`}
+							</button>
+
+							{#if showDuplicates}
+								<div class="mt-3">
+									<DuplicateList duplicates={result.duplicates} />
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</section>
+			{/if}
 
 			<ol class="grid gap-3 border-t border-zinc-800 pt-6 text-sm text-zinc-400 sm:grid-cols-3">
 				<li><span class="mr-2 font-semibold text-zinc-200">1.</span>Importar arquivos</li>
