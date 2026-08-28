@@ -1,0 +1,11 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Cartão Quebrado
+TEL:+55 47 90000-0000
+BEGIN:VCARD
+VERSION:3.0
+N:Costa;Ana;;;
+FN:Ana Costa
+TEL:+55 47 93333-4444
+EMAIL:ana@example.com
+END:VCARD

@@ -1,0 +1,18 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Müller;François;;;
+FN:François Müller
+TEL:+55 47 91111-1111
+TEL:+55 47 92222-2222
+EMAIL:francois@example.com
+EMAIL:francois.m@example.com
+NOTE:Uma nota bem longa que precisa ser dobrada em múltiplas linhas para 
+ testar o unfolding corretamente segundo a RFC 5322.
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+N:田中;太郎;;;
+FN:田中 太郎 😀
+TEL:+81 3 1234 5678
+EMAIL:tanaka@example.jp
+END:VCARD

@@ -6,9 +6,29 @@
 		file: File;
 	}
 
+	type RejectionReason = 'invalid-extension' | 'empty-file';
+
+	interface RejectedFile {
+		name: string;
+		reason: RejectionReason;
+	}
+
+	const REJECTION_LABELS: Record<RejectionReason, string> = {
+		'invalid-extension': 'extensão inválida (somente .vcf é aceito)',
+		'empty-file': 'arquivo vazio'
+	};
+
 	let selectedFiles = $state<SelectedFile[]>([]);
-	let rejectedFiles = $state<string[]>([]);
+	let rejectedFiles = $state<RejectedFile[]>([]);
 	let fileInput = $state<HTMLInputElement>();
+
+	// Um arquivo inválido não impede o processamento dos demais: cada
+	// arquivo é aceito/rejeitado de forma independente.
+	let duplicateFileNames = $derived.by(() => {
+		const names = selectedFiles.map(({ file }) => file.name);
+		const duplicates = names.filter((name, index) => names.indexOf(name) !== index);
+		return [...new Set(duplicates)];
+	});
 
 	function isVcfFile(file: File) {
 		return file.name.toLowerCase().endsWith('.vcf');
@@ -17,21 +37,36 @@
 	function addFiles(fileList: FileList | null) {
 		if (!fileList) return;
 
-		const newFiles = Array.from(fileList);
-		const validFiles = newFiles.filter(isVcfFile);
-		const invalidFiles = newFiles.filter((file) => !isVcfFile(file));
+		const accepted: SelectedFile[] = [];
+		const newlyRejected: RejectedFile[] = [];
 
-		selectedFiles = [
-			...selectedFiles,
-			...validFiles.map((file) => ({ id: crypto.randomUUID(), file }))
-		];
-		rejectedFiles = invalidFiles.map((file) => file.name);
+		for (const file of Array.from(fileList)) {
+			if (!isVcfFile(file)) {
+				newlyRejected.push({ name: file.name, reason: 'invalid-extension' });
+				continue;
+			}
+			if (file.size === 0) {
+				newlyRejected.push({ name: file.name, reason: 'empty-file' });
+				continue;
+			}
+			accepted.push({ id: crypto.randomUUID(), file });
+		}
+
+		// Nomes duplicados não são bloqueados aqui: cada arquivo já tem um
+		// id próprio (independente do nome) e o aviso abaixo torna o usuário
+		// ciente sem descartar nada silenciosamente.
+		selectedFiles = [...selectedFiles, ...accepted];
+		rejectedFiles = [...rejectedFiles, ...newlyRejected];
 
 		if (fileInput) fileInput.value = '';
 	}
 
 	function removeFile(id: string) {
 		selectedFiles = selectedFiles.filter((selectedFile) => selectedFile.id !== id);
+	}
+
+	function dismissRejected() {
+		rejectedFiles = [];
 	}
 
 	function formatFileSize(bytes: number) {
@@ -100,10 +135,33 @@
 				</div>
 
 				{#if rejectedFiles.length > 0}
-					<p
-						class="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+					<div
+						class="space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
 					>
-						Arquivos ignorados: {rejectedFiles.join(', ')}. Selecione apenas arquivos .vcf.
+						<div class="flex items-start justify-between gap-4">
+							<p class="font-medium">Arquivos ignorados</p>
+							<button
+								type="button"
+								class="shrink-0 text-xs font-medium underline underline-offset-4 hover:text-amber-100"
+								onclick={dismissRejected}
+							>
+								Limpar
+							</button>
+						</div>
+						<ul class="space-y-0.5">
+							{#each rejectedFiles as rejected (rejected.name + rejected.reason)}
+								<li>{rejected.name} — {REJECTION_LABELS[rejected.reason]}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+
+				{#if duplicateFileNames.length > 0}
+					<p
+						class="rounded-md border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-200"
+					>
+						Nomes de arquivo duplicados: {duplicateFileNames.join(', ')}. Todos serão processados
+						normalmente, mas confira se não é o mesmo arquivo selecionado por engano.
 					</p>
 				{/if}
 
