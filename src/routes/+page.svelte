@@ -3,6 +3,8 @@
 	import DuplicateList from '$lib/components/DuplicateList.svelte';
 	import ProcessingSummary from '$lib/components/ProcessingSummary.svelte';
 	import { processFiles, type FileInput, type ProcessFilesResult } from '$lib/vcard/process-files';
+	import { buildExport, downloadBlob } from '$lib/xlsx/exporter';
+	import { ALL_CONTACT_FIELDS } from '$lib/xlsx/types';
 
 	interface SelectedFile {
 		id: string;
@@ -34,6 +36,7 @@
 	let result = $state<ProcessFilesResult | null>(null);
 	let readErrors = $state<FileReadError[]>([]);
 	let showDuplicates = $state(false);
+	let exporting = $state(false);
 
 	// Um arquivo inválido não impede o processamento dos demais: cada
 	// arquivo é aceito/rejeitado de forma independente.
@@ -127,6 +130,20 @@
 		readErrors = failures;
 		result = processFiles(inputs);
 		processing = false;
+	}
+
+	// Sem seletor de colunas/modo ainda (Etapas 8-10): exporta todos os
+	// campos consolidados em uma única sheet até essa UI existir.
+	async function handleExport() {
+		if (!result || result.contacts.length === 0 || exporting) return;
+
+		exporting = true;
+		try {
+			const exportResult = await buildExport(result.contacts, ALL_CONTACT_FIELDS, 'single-sheet');
+			downloadBlob(exportResult);
+		} finally {
+			exporting = false;
+		}
 	}
 
 	function dismissRejected() {
@@ -327,6 +344,19 @@
 							{/if}
 						</div>
 					{/if}
+
+					<button
+						type="button"
+						class="w-full rounded-md bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+						disabled={exporting || result.contacts.length === 0}
+						onclick={handleExport}
+					>
+						{exporting ? 'Gerando XLSX…' : 'Baixar XLSX'}
+					</button>
+					<p class="text-center text-xs text-zinc-500">
+						Exporta todos os campos em uma única planilha. Seleção de colunas e modos de exportação
+						chegam nas próximas etapas.
+					</p>
 				</section>
 			{/if}
 
